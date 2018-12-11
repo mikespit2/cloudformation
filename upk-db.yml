@@ -1,0 +1,310 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: PeopleSoft UPK Database Stack
+Parameters:
+  EnvStack:
+    Description: Environment Stack Name
+    Type: String
+  NetworkStack:
+    Description: VPC network stack name
+    Type: String
+  AccountCIDR:
+    Description: AWS Account network CIDR
+    Type: String
+  R53HostedZone:
+    Description: Route53 Hosted Zone URL
+    Type: String
+  DBInstanceClass:
+    Description: The compute and memory capacity of the DB instance.
+    Type: String
+  DBName:
+    Description: RDS DB Name
+    Type: String
+  DBSnapshotIdentifier:
+    Description: The name or ARN of the DB snapshot to be used as the source
+    Type: String
+  Engine:
+    Description: The name of the database engine to be used for this instance.
+    Type: String
+    Default: oracle-ee
+    AllowedValues:
+      - aurora
+      - mariadb
+      - mysql
+      - oracle-ee
+      - oracle-se2
+      - oracle-se1
+      - oracle-se
+      - postgres
+      - sqlserver-ee
+      - sqlserver-se
+      - sqlserver-ex
+      - sqlserver-web
+  EngineVersion:
+    Description: DB Engine Version
+    Type: String
+  StorageType:
+    Description: Specifies the storage type to be associated with the DB instance.
+    Type: String
+    Default: gp2
+  AllocatedStorage:
+    Description: Specifies the allocated storage size specified in gigabytes.
+    Type: Number
+  MasterUsername:
+    Description: The name for the master database user.
+    Type: String
+  MasterUserPassword:
+    Description: The password for the master database user.
+    Type: String
+    NoEcho: true
+  MultiAZ:
+    Description: MultiAZ database
+    Type: String
+  DBPort:
+    Description: The port number on which the database accepts connections.
+    Type: Number
+  LicenseModel:
+    Description: License model information for this DB instance.
+    Type: String
+    Default: bring-your-own-license
+    AllowedValues:
+      - license-included
+      - bring-your-own-license
+      - general-public-license
+  CharacterSetName:
+    Description: >-
+      For supported engines, indicates that the DB instance should be associated
+      with the specified CharacterSet.
+    Type: String
+  OptionGroupName:
+    Description: DB Option Group
+    Type: String
+  DBSecurityGroup:
+    Description: OEM Security Group
+    Type: String
+Mappings: {}
+Resources:
+  RDSDBSNG:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: PeopleSoft DB Subnet Group
+      SubnetIds:
+        - !ImportValue 
+          'Fn::Sub': '${NetworkStack}-ucsndbA'
+        - !ImportValue 
+          'Fn::Sub': '${NetworkStack}-ucsndbB'
+        - !ImportValue 
+          'Fn::Sub': '${NetworkStack}-ucsndbC'
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: fffd5f6d-c2f1-4936-817d-5d88ac3cc7d5
+  RDSDB:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllocatedStorage: !Ref AllocatedStorage
+      AutoMinorVersionUpgrade: false
+      BackupRetentionPeriod: 7
+      CharacterSetName: !Ref CharacterSetName
+      DBInstanceClass: !Ref DBInstanceClass
+      DBName: !Ref DBName
+      DBInstanceIdentifier: !Ref DBName
+      DBParameterGroupName: !Ref RDSDBPG
+      DBSubnetGroupName: !Ref RDSDBSNG
+      DBSnapshotIdentifier: !Ref DBSnapshotIdentifier
+      Engine: !Ref Engine
+      EngineVersion: !Ref EngineVersion
+      LicenseModel: !Ref LicenseModel
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      MultiAZ: !Ref MultiAZ
+      Port: !Ref DBPort
+      PubliclyAccessible: false
+      CopyTagsToSnapshot: true
+      StorageType: !Ref StorageType
+      StorageEncrypted: true
+      VPCSecurityGroups:
+        - !Ref RDSSG
+        - !Ref DBSecurityGroup
+      OptionGroupName: !Ref OptionGroupName
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: b0c4125e-d99e-4110-9b8c-70e7466a0932
+    DependsOn:
+      - RDSDBSNG
+    DeletionPolicy: Delete
+  RDSDBPG:
+    Type: 'AWS::RDS::DBParameterGroup'
+    Properties:
+      Description: PeopleSoft Oracle DB Parameters
+      Family: oracle-ee-12.1
+      Parameters:
+        use_large_pages: ONLY
+        nls_length_semantics: CHAR
+        open_cursors: 1000
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: ce4f7d0c-654f-42d5-a287-0f910e4b63d8
+  EC2RDSSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: PeopleSoft EC2 server access to RDS
+      VpcId: !ImportValue 
+        'Fn::Sub': '${NetworkStack}-ucvpc'
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - ''
+            - - !Ref DBName
+              - '-'
+              - SG
+              - '-'
+              - RDS
+              - '-'
+              - EC2
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: a90f5485-90f1-4c97-a01b-347b41adedcb
+  RDSSG:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: PeopleSoft RDS Database Security Group
+      SecurityGroupIngress:
+        - Description: EC2 RDS Security Group
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          SourceSecurityGroupId: !Ref EC2RDSSG
+        - Description: AWS VPC
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: !Ref AccountCIDR
+        - Description: Oakland
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.0.0/19
+        - Description: Oakland
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.32.0/19
+        - Description: San Diego
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.64.0/19
+        - Description: Oakland
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.96.0/19
+        - Description: Oakland
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.160.0/19
+        - Description: Oakland
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.192.0/19
+        - Description: Oakland
+          IpProtocol: tcp
+          FromPort: '1521'
+          ToPort: '1521'
+          CidrIp: 128.48.224.0/19
+        - IpProtocol: tcp
+          FromPort: '5500'
+          ToPort: '5500'
+          CidrIp: 128.48.0.0/16
+        - IpProtocol: tcp
+          FromPort: '5500'
+          ToPort: '5500'
+          CidrIp: !Ref AccountCIDR
+      VpcId: !ImportValue 
+        'Fn::Sub': '${NetworkStack}-ucvpc'
+      Tags:
+        - Key: Name
+          Value: !Join 
+            - ''
+            - - !Ref DBName
+              - '-'
+              - SG
+              - '-'
+              - RDS
+              - '-'
+              - DB
+    Metadata:
+      'AWS::CloudFormation::Designer':
+        id: 1823ce25-de6d-485e-98c5-cfeab2241d68
+Metadata:
+  'AWS::CloudFormation::Designer':
+    b0c4125e-d99e-4110-9b8c-70e7466a0932:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 550
+        'y': 270
+      z: 0
+      embeds: []
+      isassociatedwith:
+        - ce4f7d0c-654f-42d5-a287-0f910e4b63d8
+        - 1823ce25-de6d-485e-98c5-cfeab2241d68
+        - d5f2d36b-6903-43f4-8bd0-45e3e57287b5
+      dependson:
+        - fffd5f6d-c2f1-4936-817d-5d88ac3cc7d5
+    fffd5f6d-c2f1-4936-817d-5d88ac3cc7d5:
+      size:
+        width: 140
+        height: 140
+      position:
+        x: 370
+        'y': 140
+      z: 0
+      embeds: []
+    ce4f7d0c-654f-42d5-a287-0f910e4b63d8:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 550
+        'y': 160
+      z: 0
+      embeds: []
+    1823ce25-de6d-485e-98c5-cfeab2241d68:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 650
+        'y': 270
+      z: 0
+      embeds: []
+    a90f5485-90f1-4c97-a01b-347b41adedcb:
+      size:
+        width: 60
+        height: 60
+      position:
+        x: 750
+        'y': 270
+      z: 0
+      embeds: []
+Outputs:
+  EC2RDSSG:
+    Description: PeopleSoft EC2 RDS Security Group
+    Value: !Ref EC2RDSSG
+    Export:
+      Name: !Sub '${EnvStack}-EC2RDSSG'
+  DBEndpoint:
+    Description: PeopleSoft RDS DB Endpoint URL
+    Value: !Join 
+      - ':'
+      - - !GetAtt 
+          - RDSDB
+          - Endpoint.Address
+        - !GetAtt 
+          - RDSDB
+          - Endpoint.Port
+    Export:
+      Name: !Sub '${EnvStack}-DBEndpoint'
